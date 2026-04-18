@@ -191,6 +191,42 @@ describe('composeMessageDetailed', () => {
     expect(result.body).toBe('AI hi Sam')
     expect(result.variant).toBe('T0-llm')
   })
+
+  it('keeps LLM route when placeholder expansion pushes resolved text past 280 chars', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                variant_index: 0,
+                body: 'Hi {firstName}, noticed you lead growth at {company} - particularly impressed by the recent expansion into European markets and the work your team published on conversion optimization. Would love to trade notes on what\'s worked for us in similar GTM motions.'
+              })
+            }
+          }
+        ]
+      })
+    } as Response)
+
+    const result = await composeMessageDetailed(
+      { ...baseSettings, llmEnabled: true },
+      {
+        profileUrl: 'https://www.linkedin.com/in/alex/',
+        firstName: 'Alexander-Constantine',
+        company: 'Acme'
+      },
+      {},
+      { executionId: 'generic_connection' }
+    )
+
+    expect(result.route).toBe('llm')
+    expect(result.variant).toBe('T0-llm')
+    expect(result.body).toContain('Alexander-Constantine')
+    expect(result.body).toContain('Acme')
+    expect(result.body.length).toBeLessThanOrEqual(280)
+    expect(result.body.endsWith('optim')).toBe(false)
+  })
 })
 
 describe('detectJobIntent', () => {

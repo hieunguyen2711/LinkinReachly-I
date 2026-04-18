@@ -64,7 +64,7 @@ export async function composeMessageDetailed(
   if (!settings.llmEnabled) {
     const { body, variant } = pickVariant(templates, row.profileUrl)
     return {
-      body: fillTemplate(body, row, facts),
+      body: clampMessageToLimit(fillTemplate(body, row, facts), 280),
       variant,
       route: 'template',
       detail: 'llm_disabled'
@@ -74,7 +74,7 @@ export async function composeMessageDetailed(
   if (!key) {
     const { body, variant } = pickVariant(templates, row.profileUrl)
     return {
-      body: fillTemplate(body, row, facts),
+      body: clampMessageToLimit(fillTemplate(body, row, facts), 280),
       variant,
       route: 'template',
       detail: 'no_api_key'
@@ -145,35 +145,27 @@ Strict JSON: {"variant_index": number, "body": string}`
     if (!text) {
       const fb = fillTemplate(templates[idx], row, facts)
       return {
-        body: fb,
+        body: clampMessageToLimit(fb, 280),
         variant: `T${idx}-fallback`,
         route: 'template',
         detail: 'llm_empty_body'
       }
     }
     const MAX_LEN = 280
-    if (text.length > MAX_LEN) {
-      const fb = fillTemplate(templates[idx], row, facts)
-      return {
-        body: fb.slice(0, MAX_LEN),
-        variant: `T${idx}-validated`,
-        route: 'template',
-        detail: `over_limit:${text.length}`
-      }
-    }
     text = fillTemplate(text, row, facts)
+    text = clampMessageToLimit(text, MAX_LEN)
     const validation = validateMessageBody(text, settings.mustInclude, MAX_LEN)
     if (!validation.ok) {
       const fb = fillTemplate(templates[idx], row, facts)
       return {
-        body: fb.slice(0, MAX_LEN),
+        body: clampMessageToLimit(fb, MAX_LEN),
         variant: `T${idx}-validated`,
         route: 'template',
         detail: `mustInclude_fail:${validation.detail}`
       }
     }
     return {
-      body: text.slice(0, MAX_LEN),
+      body: text,
       variant: `T${idx}-llm`,
       route: 'llm',
       detail: `provider:${settings.llmProvider}`
@@ -182,7 +174,7 @@ Strict JSON: {"variant_index": number, "body": string}`
     const { body, variant } = pickVariant(templates, row.profileUrl)
     const detail = extractErrorDetail(error)
     return {
-      body: fillTemplate(body, row, facts),
+      body: clampMessageToLimit(fillTemplate(body, row, facts), 280),
       variant,
       route: 'template',
       detail: `${classifyLlmError(detail)}:${detail}`
@@ -287,6 +279,23 @@ function heuristicExecution(prompt: string): ExecutionDefinition {
     return getExecutionById('influencer_connection')!
   }
   return getExecutionById('generic_connection')!
+}
+
+function clampMessageToLimit(text: string, maxLen: number): string {
+  const normalized = text.trim()
+  if (normalized.length <= maxLen) return normalized
+
+  let clipped = normalized.slice(0, maxLen).trimEnd()
+  if (!clipped) return normalized.slice(0, maxLen)
+
+  // If we cut in the middle of a token, back up to the previous whitespace boundary.
+  const nextChar = normalized.charAt(maxLen)
+  if (nextChar && /\S/.test(nextChar) && /[\p{L}\p{N}]$/u.test(clipped)) {
+    const lastWhitespace = clipped.lastIndexOf(' ')
+    if (lastWhitespace > 0) clipped = clipped.slice(0, lastWhitespace).trimEnd()
+  }
+
+  return clipped || normalized.slice(0, maxLen)
 }
 
 function compactAudience(prompt: string): string {
